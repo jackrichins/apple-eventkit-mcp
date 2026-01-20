@@ -2,11 +2,43 @@
 
 from datetime import datetime, timedelta
 from typing import Optional
+import zoneinfo
 
 from mcp.server.fastmcp import FastMCP
 
 from .eventkit_store import EventKitStore
 from .permissions import PermissionError
+
+
+def _get_current_datetime_context() -> dict:
+    """Get current date/time context to help with scheduling.
+
+    Returns a dict with current date, time, day of week, and upcoming days map.
+    """
+    # Get local timezone
+    try:
+        local_tz = datetime.now().astimezone().tzinfo
+        tz_name = str(local_tz)
+    except Exception:
+        tz_name = "local"
+
+    now = datetime.now()
+
+    # Build map of upcoming days
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    upcoming_days = {}
+    for i in range(1, 8):
+        future_date = now + timedelta(days=i)
+        day_name = day_names[future_date.weekday()]
+        upcoming_days[day_name] = future_date.strftime("%Y-%m-%d")
+
+    return {
+        "current_date": now.strftime("%Y-%m-%d"),
+        "current_time": now.strftime("%H:%M:%S"),
+        "day_of_week": day_names[now.weekday()],
+        "timezone": tz_name,
+        "upcoming_days": upcoming_days,
+    }
 
 
 def register_calendar_tools(mcp: FastMCP, store: EventKitStore) -> None:
@@ -66,6 +98,7 @@ def register_calendar_tools(mcp: FastMCP, store: EventKitStore) -> None:
 
             return {
                 "success": True,
+                "today": _get_current_datetime_context(),
                 "events": events,
                 "count": len(events),
             }
