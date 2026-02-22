@@ -1,9 +1,15 @@
 """Permission handling for EventKit access on macOS."""
 
+import platform
 from enum import Enum
 from typing import Callable
 
 import EventKit
+
+
+def _macos_version() -> tuple[int, ...]:
+    """Return the macOS version as a tuple, e.g. (14, 5, 0)."""
+    return tuple(int(x) for x in platform.mac_ver()[0].split("."))
 
 
 class AuthorizationStatus(Enum):
@@ -31,7 +37,10 @@ def check_calendar_permission() -> dict:
     return {
         "status": get_status_name(status),
         "authorized": status == AuthorizationStatus.AUTHORIZED.value,
-        "can_request": status == AuthorizationStatus.NOT_DETERMINED.value,
+        "can_request": status in (
+            AuthorizationStatus.NOT_DETERMINED.value,
+            AuthorizationStatus.WRITE_ONLY.value,
+        ),
     }
 
 
@@ -70,11 +79,15 @@ def get_permission_instructions(calendar: dict, reminders: dict) -> str:
     instructions = []
 
     if not calendar["authorized"]:
-        if calendar["status"] == "denied":
+        if calendar["status"] == "write_only":
             instructions.append(
-                "Calendar access denied. Please enable in: "
-                "System Settings > Privacy & Security > Calendar > "
-                "Enable access for Terminal or Claude Desktop."
+                "Calendar has write-only access — full access is required. "
+                "Run: uv run python scripts/setup_permissions.py from Terminal.app"
+            )
+        elif calendar["status"] == "denied":
+            instructions.append(
+                "Calendar access denied. "
+                "Run: uv run python scripts/setup_permissions.py from Terminal.app"
             )
         elif calendar["status"] == "restricted":
             instructions.append(
@@ -82,16 +95,17 @@ def get_permission_instructions(calendar: dict, reminders: dict) -> str:
             )
         else:
             instructions.append(
-                "Calendar access not yet requested. "
-                "Run the setup_permissions.py script from Terminal."
+                "Calendar access not yet granted. "
+                "Run: uv run python scripts/setup_permissions.py from Terminal.app "
+                "(not your IDE's integrated terminal). The permission is granted to "
+                "the 'uv' binary and will work from any MCP client."
             )
 
     if not reminders["authorized"]:
         if reminders["status"] == "denied":
             instructions.append(
-                "Reminders access denied. Please enable in: "
-                "System Settings > Privacy & Security > Reminders > "
-                "Enable access for Terminal or Claude Desktop."
+                "Reminders access denied. "
+                "Run: uv run python scripts/setup_permissions.py from Terminal.app"
             )
         elif reminders["status"] == "restricted":
             instructions.append(
@@ -99,8 +113,8 @@ def get_permission_instructions(calendar: dict, reminders: dict) -> str:
             )
         else:
             instructions.append(
-                "Reminders access not yet requested. "
-                "Run the setup_permissions.py script from Terminal."
+                "Reminders access not yet granted. "
+                "Run: uv run python scripts/setup_permissions.py from Terminal.app"
             )
 
     return "\n".join(instructions)
@@ -112,38 +126,58 @@ def request_calendar_access(
 ) -> None:
     """Request calendar access permission.
 
-    Note: On macOS, this will only show a dialog if run from a context
-    that can present UI (e.g., Terminal). When run as a subprocess of
-    Claude Desktop, you may need to grant permissions manually.
+    On macOS 14+, uses requestFullAccessToEventsWithCompletion_ instead of
+    the deprecated requestAccessToEntityType_completion_, which silently
+    fails to show a permission dialog from non-Apple apps like VS Code.
+
+    Note: This will only show a dialog when run from a context that can
+    present UI (e.g., Terminal.app). When run as a subprocess of an IDE,
+    the request may silently fail. Use setup_permissions.py from
+    Terminal.app to grant permissions.
     """
     def default_callback(granted: bool, error: object) -> None:
         pass
 
-    store.requestAccessToEntityType_completion_(
-        EventKit.EKEntityTypeEvent,
-        callback or default_callback
-    )
+    cb = callback or default_callback
+
+    if _macos_version() >= (14, 0):
+        store.requestFullAccessToEventsWithCompletion_(cb)
+    else:
+        store.requestAccessToEntityType_completion_(
+            EventKit.EKEntityTypeEvent, cb
+        )
 
 
 def request_reminders_access(
     store: EventKit.EKEventStore,
     callback: Callable[[bool, object], None] | None = None
 ) -> None:
-    """Request reminders access permission."""
+    """Request reminders access permission.
+
+    On macOS 14+, uses requestFullAccessToRemindersWithCompletion_ instead
+    of the deprecated requestAccessToEntityType_completion_.
+    """
     def default_callback(granted: bool, error: object) -> None:
         pass
 
-    store.requestAccessToEntityType_completion_(
-        EventKit.EKEntityTypeReminder,
-        callback or default_callback
-    )
+    cb = callback or default_callback
+
+    if _macos_version() >= (14, 0):
+        store.requestFullAccessToRemindersWithCompletion_(cb)
+    else:
+        store.requestAccessToEntityType_completion_(
+            EventKit.EKEntityTypeReminder, cb
+        )
 
 
 def request_all_permissions(store: EventKit.EKEventStore) -> None:
-    """Request both Calendar and Reminders permissions.
+    """Request both Calendar and Reminders permissions (best-effort).
 
-    This triggers the system permission dialogs if permissions
-    haven't been determined yet.
+    This is called at server startup as a best-effort attempt. It will
+    only succeed if the process can present TCC dialogs (e.g., when run
+    from Terminal.app). When running as an MCP subprocess of VS Code or
+    similar IDEs, this will silently fail — users must run
+    setup_permissions.py from Terminal.app instead.
     """
     calendar = check_calendar_permission()
     reminders = check_reminders_permission()
@@ -167,12 +201,17 @@ class PermissionError(Exception):
     def _get_instructions(self) -> str:
         if self.status == "denied":
             return (
-                f"Please enable access in System Settings > Privacy & Security > "
-                f"{self.entity_type}. Add Claude Desktop or Terminal to allowed apps."
+                "Please run: uv run python scripts/setup_permissions.py "
+                "from Terminal.app (not your IDE's terminal)."
             )
         elif self.status == "restricted":
             return "Access is restricted by device policy."
-        return "Please run the setup_permissions.py script to request permissions."
+        return (
+            "Please run: uv run python scripts/setup_permissions.py "
+            "from Terminal.app (not your IDE's terminal). "
+            "The permission is granted to the 'uv' binary and will "
+            "work from any MCP client."
+        )
 
 
 def require_calendar_permission() -> None:
