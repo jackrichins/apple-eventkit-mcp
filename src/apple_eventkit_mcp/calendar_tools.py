@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import zoneinfo
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from .eventkit_store import EventKitStore
 from .permissions import PermissionError
@@ -41,7 +41,7 @@ def _get_current_datetime_context() -> dict:
     }
 
 
-def register_calendar_tools(mcp: FastMCP, store: EventKitStore) -> None:
+def register_calendar_tools(mcp: MCPServer, store: EventKitStore) -> None:
     """Register all calendar-related tools with the MCP server."""
 
     @mcp.tool()

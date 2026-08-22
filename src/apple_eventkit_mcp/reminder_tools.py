@@ -3,13 +3,13 @@
 from datetime import datetime
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from .eventkit_store import EventKitStore
 from .permissions import PermissionError
 
 
-def register_reminder_tools(mcp: FastMCP, store: EventKitStore) -> None:
+def register_reminder_tools(mcp: MCPServer, store: EventKitStore) -> None:
     """Register all reminder-related tools with the MCP server."""
 
     @mcp.tool()

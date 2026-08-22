@@ -2,7 +2,7 @@
 
 import sys
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from .eventkit_store import EventKitStore
 from .calendar_tools import register_calendar_tools
@@ -10,9 +10,10 @@ from .reminder_tools import register_reminder_tools
 from .permissions import check_permissions
 
 
-# Initialize the FastMCP server
-mcp = FastMCP(
+# Initialize the MCP server
+mcp = MCPServer(
     "Apple EventKit",
+    version="0.1.0",
     dependencies=[
         "pyobjc-framework-EventKit",
         "pyobjc-framework-Cocoa",
